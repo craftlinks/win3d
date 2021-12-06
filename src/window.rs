@@ -1,14 +1,24 @@
 use crate::win32_common::ToWide;
-use windows::core::Result;
+use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, PWSTR, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRect, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassW,
-    SetWindowLongPtrW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
-    IDC_HAND, MSG, PM_REMOVE, WM_DESTROY, WM_NCCREATE, WM_QUIT, WNDCLASSW,
-    WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_SYSMENU, WS_VISIBLE, WM_ACTIVATE,
+    AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassW,
+    SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
+    GWLP_USERDATA, IDC_CROSS, MSG, PM_REMOVE, WM_ACTIVATE, WM_DESTROY, WM_NCCREATE, WM_QUIT,
+    WNDCLASSW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_SYSMENU, WS_VISIBLE,
 };
+
+// Dealing with errors
+//======================
+// .map_err(|e| os_error!(e));
+// return Err(os_error!(::windows::core::Error::from_win32()))
+// For example: AdjustWindowRect(&mut wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, BOOL(0)).ok().map_err(|e| win_error!(e))?;
+use crate::error::Win32Error;
+pub type Result<T> = core::result::Result<T, Win32Error>;
+
+
 pub struct Window {
     width: i32,
     height: i32,
@@ -35,7 +45,7 @@ impl Window {
 
             let wc = {
                 WNDCLASSW {
-                    hCursor: LoadCursorW(None, IDC_HAND),
+                    hCursor: LoadCursorW(None, IDC_CROSS),
                     hInstance: instance,
                     lpszClassName: PWSTR(window_class_name),
 
@@ -55,7 +65,8 @@ impl Window {
                 wr.right = self.width + wr.left;
                 wr.top = 100;
                 wr.bottom = self.height + wr.top;
-                AdjustWindowRect(&mut wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, BOOL(0));
+                // Adjust window size to accomodate the desired client dimensions specified by `width` and `height`.
+                AdjustWindowRect(&mut wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, BOOL(0)).ok().map_err(|e| win_error!(e))?;
                 let window_name: &str = &self.window_name;
                 CreateWindowExW(
                     Default::default(),
@@ -69,7 +80,7 @@ impl Window {
                     None,
                     None,
                     instance,
-                    self as *mut _ as _,
+                    self as *mut Window as *const c_void,
                 )
             };
 
@@ -86,6 +97,7 @@ impl Window {
                         if message.message == WM_QUIT {
                             return Ok(());
                         }
+                        TranslateMessage(&message);
                         DispatchMessageW(&message);
                     }
                 } else {
@@ -94,7 +106,7 @@ impl Window {
                     if message.message == WM_QUIT {
                         return Ok(());
                     }
-
+                    TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
             }
@@ -112,7 +124,7 @@ impl Window {
                     self.visible = true; // TODO: unpack !HIWORD(wparam);
                     LRESULT(0)
                 }
-                
+
                 WM_DESTROY => {
                     PostQuitMessage(0);
                     LRESULT(0)
@@ -123,7 +135,7 @@ impl Window {
     }
 
     extern "system" fn wndproc(
-        window: HWND,
+        window_handle: HWND,
         message: u32,
         wparam: WPARAM,
         lparam: LPARAM,
@@ -132,16 +144,27 @@ impl Window {
             if message == WM_NCCREATE {
                 let cs = lparam.0 as *const CREATESTRUCTW;
                 let this = (*cs).lpCreateParams as *mut Self;
-                (*this).window_handle = window;
-                SetWindowLongPtrW(window, GWLP_USERDATA, this as isize);
+                (*this).window_handle = window_handle;
+                SetWindowLongPtrW(window_handle, GWLP_USERDATA, this as isize);
             } else {
-                let this = GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Self;
+                let this = GetWindowLongPtrW(window_handle, GWLP_USERDATA) as *mut Self;
                 if !this.is_null() {
                     return (*this).user_message_handler(message, wparam, lparam);
                 }
             }
 
-            DefWindowProcW(window, message, wparam, lparam)
+            DefWindowProcW(window_handle, message, wparam, lparam)
+        }
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        unsafe {
+            if self.window_handle.0 != 0 {
+                println!("Destroying window.");
+                let _ = DestroyWindow(self.window_handle).ok().map_err(|e| println!("{}",win_error!(e)));
+            }
         }
     }
 }

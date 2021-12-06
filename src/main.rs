@@ -1,12 +1,13 @@
-use windows::{
-    core::Result};
-
+#[macro_use]
+mod error;
+use error::Win32Error;
 mod win32_common;
 
 
 mod window;
-use window::Window;
 
+use window::Window;
+pub type Result<T> = core::result::Result<T, Win32Error>;
 
 fn main() -> Result<()> {
 
