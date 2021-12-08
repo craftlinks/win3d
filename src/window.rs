@@ -2,13 +2,17 @@ use crate::win32_common::ToWide;
 use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, PWSTR, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{VK_SPACE, VK_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassW,
-    SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    GWLP_USERDATA, IDC_CROSS, MSG, PM_REMOVE, WM_ACTIVATE, WM_DESTROY, WM_NCCREATE, WM_QUIT,
-    WNDCLASSW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_SYSMENU, WS_VISIBLE,
+    GetMessageW, GetWindowLongPtrW, LoadCursorW, MessageBoxW, PeekMessageW, PostQuitMessage,
+    RegisterClassW, SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, GWLP_USERDATA, IDC_CROSS, MB_OK, MSG, PM_REMOVE, WM_ACTIVATE,
+    WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_NCCREATE, WM_QUIT, WNDCLASSW, WS_CAPTION,
+    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_SYSMENU, WS_VISIBLE, WM_KILLFOCUS, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
+
+use crate::keyboard::Keyboard;
 
 // Dealing with errors
 //======================
@@ -18,13 +22,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::error::Win32Error;
 pub type Result<T> = core::result::Result<T, Win32Error>;
 
-
 pub struct Window {
     width: i32,
     height: i32,
     window_name: String,
     window_handle: HWND,
     visible: bool,
+    kbd: Keyboard,
 }
 
 impl Window {
@@ -35,6 +39,7 @@ impl Window {
             window_name: window_user_name.into(),
             window_handle: HWND(0),
             visible: false, // will need to be set on actual window creation
+            kbd: Keyboard::new(),
         }
     }
 
@@ -66,7 +71,9 @@ impl Window {
                 wr.top = 100;
                 wr.bottom = self.height + wr.top;
                 // Adjust window size to accomodate the desired client dimensions specified by `width` and `height`.
-                AdjustWindowRect(&mut wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, BOOL(0)).ok().map_err(|e| win_error!(e))?;
+                AdjustWindowRect(&mut wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, BOOL(0))
+                    .ok()
+                    .map_err(|e| win_error!(e))?;
                 let window_name: &str = &self.window_name;
                 CreateWindowExW(
                     Default::default(),
@@ -114,6 +121,17 @@ impl Window {
     }
 
     fn render(&mut self) -> Result<()> {
+        if self.kbd.key_is_pressed(VK_MENU.0) {
+            unsafe {
+                MessageBoxW(
+                    HWND(0),
+                    PWSTR("Message Received!".to_wide().as_ptr() as *mut u16),
+                    PWSTR("ALT Key Pressed!".to_wide().as_ptr() as *mut u16),
+                    MB_OK,
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -121,10 +139,40 @@ impl Window {
         unsafe {
             match message {
                 WM_ACTIVATE => {
-                    self.visible = true; // TODO: unpack !HIWORD(wparam);
+                    self.visible = true;
                     LRESULT(0)
                 }
 
+                WM_KEYDOWN | WM_SYSKEYDOWN => {
+                    // filter for autorepeat key messages to decide whether to process a key press or not.
+                    if lparam.0 & 0x40000000 == 0 || self.kbd.auto_repeat_is_enabled() {
+                        self.kbd.on_key_pressed(
+                        wparam
+                            .0
+                            .try_into()
+                            .expect("failed to convert keycode to u8"),
+                        );
+                    }
+                    LRESULT(0)
+                }
+
+                WM_KEYUP | WM_SYSKEYUP => {
+                    self.kbd
+                        .on_key_released(wparam.0.try_into().expect("failed to convert keycode"));
+                    LRESULT(0)
+                }
+
+                WM_CHAR => {
+                    self.kbd
+                        .on_char(wparam.0.try_into().expect("failed to convert char"));
+                    LRESULT(0)
+                }
+
+                WM_KILLFOCUS => {
+                    self.kbd.clear_state();
+                    LRESULT(0)
+                }
+                
                 WM_DESTROY => {
                     PostQuitMessage(0);
                     LRESULT(0)
@@ -163,7 +211,9 @@ impl Drop for Window {
         unsafe {
             if self.window_handle.0 != 0 {
                 println!("Destroying window.");
-                let _ = DestroyWindow(self.window_handle).ok().map_err(|e| println!("{}",win_error!(e)));
+                let _ = DestroyWindow(self.window_handle)
+                    .ok()
+                    .map_err(|e| println!("{}", win_error!(e))); // TODO: error triggers on exit!?
             }
         }
     }
