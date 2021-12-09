@@ -42,11 +42,11 @@ impl Keyboard {
     }
 
     pub fn flush_key(&mut self) {
-        self.key_buffer = VecDeque::<Event>::new();
+        self.key_buffer.clear();
     }
 
     pub fn flush_char(&mut self) {
-        self.char_buffer = VecDeque::<u16>::new();
+        self.char_buffer.clear();
     }
 
     pub fn flush(&mut self) {
@@ -71,7 +71,7 @@ impl Keyboard {
     pub fn on_key_pressed(&mut self, keycode: u16) {
         self.key_states[keycode as usize] = true;
         self.key_buffer.push_back(Event {
-            event_type: Type::Press,
+            event_type: EventType::Press,
             code: keycode,
         });
         Self::trim_buffer(&mut self.key_buffer);
@@ -81,7 +81,7 @@ impl Keyboard {
     pub fn on_key_released(&mut self, keycode: u16) {
         self.key_states[keycode as usize] = false;
         self.key_buffer.push_back(Event {
-            event_type: Type::Release,
+            event_type: EventType::Release,
             code: keycode,
         });
         Self::trim_buffer(&mut self.key_buffer);
@@ -103,25 +103,25 @@ impl Keyboard {
 }
 
 pub struct Event {
-    event_type: Type,
+    event_type: EventType,
     code: u16,
 }
 
 impl Event {
-    pub fn new(event_type: Type, code: u16) -> Event {
+    pub fn new(event_type: EventType, code: u16) -> Event {
         Event { event_type, code }
     }
 
     pub fn is_press(&self) -> bool {
-        self.event_type == Type::Press
+        self.event_type == EventType::Press
     }
 
     pub fn is_release(&self) -> bool {
-        self.event_type == Type::Release
+        self.event_type == EventType::Release
     }
 
     pub fn is_valid(&self) -> bool {
-        self.event_type != Type::Invalid
+        self.event_type != EventType::Invalid
     }
 
     pub fn get_code(&self) -> u16 {
@@ -132,13 +132,13 @@ impl Event {
 impl Default for Event {
     fn default() -> Self {
         Self {
-            event_type: Type::Invalid,
+            event_type: EventType::Invalid,
             code: 0,
         }
     }
 }
 #[derive(PartialEq)]
-pub enum Type {
+pub enum EventType {
     Press,
     Release,
     Invalid,

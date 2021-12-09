@@ -2,17 +2,21 @@ use crate::win32_common::ToWide;
 use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, PWSTR, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_SPACE, VK_MENU};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_MENU, VK_SPACE};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetMessageW, GetWindowLongPtrW, LoadCursorW, MessageBoxW, PeekMessageW, PostQuitMessage,
     RegisterClassW, SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, GWLP_USERDATA, IDC_CROSS, MB_OK, MSG, PM_REMOVE, WM_ACTIVATE,
-    WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_NCCREATE, WM_QUIT, WNDCLASSW, WS_CAPTION,
-    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_SYSMENU, WS_VISIBLE, WM_KILLFOCUS, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CW_USEDEFAULT, GWLP_USERDATA, IDC_CROSS, MB_OK, MK_LBUTTON, MK_RBUTTON, MSG, PM_REMOVE,
+    WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_NCCREATE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW,
+    WS_SYSMENU, WS_VISIBLE,
 };
 
 use crate::keyboard::Keyboard;
+use crate::mouse::Mouse;
+use crate::graphics::Graphics;
 
 // Dealing with errors
 //======================
@@ -27,8 +31,10 @@ pub struct Window {
     height: i32,
     window_name: String,
     window_handle: HWND,
-    visible: bool,
+    pub visible: bool,
     kbd: Keyboard,
+    mouse: Mouse,
+    pub gfx: Option<Graphics>, 
 }
 
 impl Window {
@@ -40,10 +46,12 @@ impl Window {
             window_handle: HWND(0),
             visible: false, // will need to be set on actual window creation
             kbd: Keyboard::new(),
+            mouse: Mouse::new(),
+            gfx: None,
         }
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn initialize(&mut self) -> Result<()> {
         unsafe {
             let instance = GetModuleHandleW(None);
             let window_class_name = "window".to_wide().as_ptr() as *mut u16;
@@ -91,36 +99,20 @@ impl Window {
                 )
             };
 
+            
+            // Check for error
             debug_assert!(window_handle.0 != 0);
             debug_assert!(window_handle == self.window_handle);
-            let mut message = MSG::default();
 
-            loop {
-                // Initially the window is not visible
-                if self.visible {
-                    self.render()?;
+            // Create graphics object
+            self.gfx = Some(Graphics::new(window_handle)?);
 
-                    while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).into() {
-                        if message.message == WM_QUIT {
-                            return Ok(());
-                        }
-                        TranslateMessage(&message);
-                        DispatchMessageW(&message);
-                    }
-                } else {
-                    GetMessageW(&mut message, None, 0, 0);
-
-                    if message.message == WM_QUIT {
-                        return Ok(());
-                    }
-                    TranslateMessage(&message);
-                    DispatchMessageW(&message);
-                }
-            }
+            Ok(())
         }
     }
 
     fn render(&mut self) -> Result<()> {
+        // TEST KBD CODE
         if self.kbd.key_is_pressed(VK_MENU.0) {
             unsafe {
                 MessageBoxW(
@@ -129,6 +121,19 @@ impl Window {
                     PWSTR("ALT Key Pressed!".to_wide().as_ptr() as *mut u16),
                     MB_OK,
                 );
+            }
+        }
+
+        // TEST MOUSE CODE
+        while !self.mouse.is_empty() {
+            if let Some(event) = self.mouse.read() {
+                if event.get_type() == crate::mouse::EventType::Move {
+                    println!(
+                        "Mouse Position: {}, {}",
+                        event.get_pos_x(),
+                        event.get_pos_y()
+                    );
+                }
             }
         }
 
@@ -147,10 +152,10 @@ impl Window {
                     // filter for autorepeat key messages to decide whether to process a key press or not.
                     if lparam.0 & 0x40000000 == 0 || self.kbd.auto_repeat_is_enabled() {
                         self.kbd.on_key_pressed(
-                        wparam
-                            .0
-                            .try_into()
-                            .expect("failed to convert keycode to u8"),
+                            wparam
+                                .0
+                                .try_into()
+                                .expect("failed to convert keycode to u8"),
                         );
                     }
                     LRESULT(0)
@@ -172,7 +177,66 @@ impl Window {
                     self.kbd.clear_state();
                     LRESULT(0)
                 }
-                
+
+                WM_MOUSEMOVE => {
+                    // First 16-bits of lparam contain mouse x-position
+                    let x = lparam.0 & 0xFFFF;
+                    // Next 16-bits of lparam contain mouse y-position
+                    let y = (lparam.0 >> 16) & 0xFFFF;
+
+                    // Mouse inside client area
+                    if x >= 0 && y >= 0 && x < self.width as isize && y < self.height as isize {
+                        self.mouse.on_mouse_move(x, y);
+                        if !self.mouse.is_in_window() {
+                            // Still receive mouse move events when we leave the window client area
+                            SetCapture(self.window_handle);
+                            self.mouse.on_mouse_enter();
+                        }
+                    }
+                    // Mouse outside client area
+                    else {
+                        // track mouse when left or right button is pressed (dragging)
+                        if self.mouse.left_is_pressed() || self.mouse.right_is_pressed() {
+                            self.mouse.on_mouse_move(x, y);
+                        }
+                        // Don't track mouse when leaving the client area
+                        else {
+                            ReleaseCapture();
+                            self.mouse.on_mouse_leave();
+                        }
+                    }
+                    LRESULT(0)
+                }
+
+                WM_LBUTTONDOWN => {
+                    self.mouse.on_left_pressed();
+                    LRESULT(0)
+                }
+
+                WM_RBUTTONDOWN => {
+                    self.mouse.on_right_pressed();
+                    LRESULT(0)
+                }
+
+                WM_LBUTTONUP => {
+                    self.mouse.on_left_released();
+                    LRESULT(0)
+                }
+
+                WM_RBUTTONUP => {
+                    self.mouse.on_right_released();
+                    LRESULT(0)
+                }
+
+                WM_MOUSEHWHEEL => {
+                    // First 16-bits of lparam contain mouse x-position
+                    let x = lparam.0 & 0xFFFF;
+                    // Next 16-bits of lparam contain mouse y-position
+                    let y = (lparam.0 >> 16) & 0xFFFF;
+                    self.mouse.on_wheel_delta(x, y, wparam.0);
+                    LRESULT(0)
+                }
+
                 WM_DESTROY => {
                     PostQuitMessage(0);
                     LRESULT(0)
