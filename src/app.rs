@@ -51,8 +51,10 @@ impl App {
     fn render(&mut self) -> Result<()> {
         let now = Instant::now().duration_since(self.init_time).as_secs_f32();
         let c = f32::sin(now) / 2.0 + 0.5;
-        self.window.gfx.as_mut().unwrap().clear_buffer(c / 1.2, 1.0 - c / 1.5,  1.0 - c /1.2);
-        self.window.gfx.as_ref().unwrap().present_frame()?;
+        let gfx = self.window.gfx.as_mut().unwrap();
+        gfx.clear_buffer(c / 1.2, 1.0 - c / 1.5,  1.0 - c /1.2);
+        gfx.draw_test_triangle();
+        gfx.present_frame()?;
         Ok(())
     }
 }

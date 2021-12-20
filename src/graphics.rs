@@ -1,13 +1,17 @@
 use std::ptr;
 
 use windows::Win32::{
-    Foundation::{BOOL, HINSTANCE, HWND},
+    Foundation::{BOOL, HINSTANCE, HWND, PSTR, PWSTR},
     Graphics::{
-        Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
+        Direct3D::{
+            Fxc::{D3DCompileFromFile, D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION},
+            D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
+        },
         Direct3D11::{
-            D3D11CreateDeviceAndSwapChain, ID3D11Device, ID3D11DeviceContext,
-            ID3D11RenderTargetView, ID3D11Resource, D3D11_CREATE_DEVICE_SINGLETHREADED,
-            D3D11_SDK_VERSION, D3D11_CREATE_DEVICE_DEBUG,
+            D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage, ID3D11Device,
+            ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Resource, D3D11_BIND_VERTEX_BUFFER,
+            D3D11_BUFFER_DESC, D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_SINGLETHREADED,
+            D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
         },
         Dxgi::{
             Common::{
@@ -20,7 +24,7 @@ use windows::Win32::{
     },
 };
 
-use crate::error::Win32Error;
+use crate::{error::Win32Error, win32_common::ToWide};
 pub type Result<T> = core::result::Result<T, Win32Error>;
 
 pub struct Graphics {
@@ -138,4 +142,100 @@ impl Graphics {
                 .ClearRenderTargetView(&self.render_target_view, colorrgba);
         }
     }
+
+    pub fn draw_test_triangle(&mut self) -> Result<()> {
+        let bd = D3D11_BUFFER_DESC {
+            ByteWidth: core::mem::size_of::<[Vertex; 3]>() as u32,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_VERTEX_BUFFER.0,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+            StructureByteStride: core::mem::size_of::<Vertex>() as u32,
+        };
+
+        let sd = D3D11_SUBRESOURCE_DATA {
+            pSysMem: unsafe { std::mem::transmute(TRIANGLE.as_mut_ptr()) },
+            SysMemPitch: 0,
+            SysMemSlicePitch: 0,
+        };
+
+        let vertex_buffer = unsafe {
+            self.device
+                .CreateBuffer(&bd, &sd)
+                .map_err(|e| win_error!(e))?
+        };
+
+        // Bind vertex buffer to pipeline
+        let stride = core::mem::size_of::<Vertex>() as u32;
+        let offset = 0;
+
+        unsafe {
+            self.device_context
+                .IASetVertexBuffers(0, 1, &Some(vertex_buffer), &stride, &offset)
+        };
+
+        // Create vertex shader
+        let exe_path = std::env::current_exe().ok().unwrap();
+        let asset_path = exe_path.parent().unwrap();
+        let shaders_hlsl_path = asset_path.join("shaders.hlsl");
+        let shaders_hlsl = shaders_hlsl_path.to_str().unwrap();
+
+        let mut vertex_shader_blob = None;
+        let vertex_shader_blob = unsafe {
+            let compile_flags = if cfg!(debug_assertions) {
+                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION
+            } else {
+                0
+            };
+            // TODO Geert: MOVE THIS TO GFX INITIALIZATION. We don't want to compile from source each render!!
+            D3DCompileFromFile(
+                PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
+                std::ptr::null_mut(),
+                None,
+                PSTR("VSMain".as_ptr() as *mut u8),
+                PSTR("vs_5_0".as_ptr() as *mut u8),
+                compile_flags,
+                0,
+                &mut vertex_shader_blob,
+                std::ptr::null_mut(),
+            )
+        }
+        .map(|()| vertex_shader_blob.unwrap())
+        .map_err(|e| win_error!(e))?;
+
+        let vertex_shader = unsafe {
+            let class_linkage = self
+                .device
+                .CreateClassLinkage()
+                .map_err(|e| win_error!(e))?;
+            self.device
+                .CreateVertexShader(
+                    vertex_shader_blob.GetBufferPointer(),
+                    vertex_shader_blob.GetBufferSize(),
+                    class_linkage,
+                )
+                .map_err(|e| win_error!(e))?
+        };
+
+        let class_instance: Option<ID3D11ClassInstance> = None;
+        unsafe {
+            self.device_context
+                .VSSetShader(&vertex_shader, &class_instance, 0);
+        
+
+        self.device_context.Draw(core::mem::size_of::<[Vertex;3]> as u32, 0);
+        }
+        Ok(())
+    }
 }
+
+struct Vertex {
+    x: f32,
+    y: f32,
+}
+
+const TRIANGLE: [Vertex; 3] = [
+    Vertex { x: 0.0, y: 0.5 },
+    Vertex { x: 0.5, y: 0.5 },
+    Vertex { x: -0.5, y: -0.5 },
+];
