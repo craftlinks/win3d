@@ -5,7 +5,7 @@ use windows::Win32::{
     Graphics::{
         Direct3D::{
             Fxc::{D3DCompileFromFile, D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION},
-            D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
+            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
         },
         Direct3D11::{
             D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage, ID3D11Device,
@@ -33,6 +33,8 @@ pub struct Graphics {
     swap_chain: IDXGISwapChain,
     device_context: ID3D11DeviceContext,
     render_target_view: ID3D11RenderTargetView,
+    vertex_shader_blob: ID3DBlob,
+    pixel_shader_blob: ID3DBlob,
 }
 
 impl Graphics {
@@ -110,12 +112,60 @@ impl Graphics {
                     .map_err(|e| win_error!(e))?
             };
 
+            // Create vertex shader
+            let exe_path = std::env::current_exe().ok().unwrap();
+            let asset_path = exe_path.parent().unwrap();
+            let shaders_hlsl_path = asset_path.join("shaders.hlsl");
+            let shaders_hlsl = shaders_hlsl_path.to_str().unwrap();
+            println!("shader at: {shaders_hlsl}");
+
+            let compile_flags = if cfg!(debug_assertions) {
+                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION
+            } else {
+                0
+            };
+
+            let mut vertex_shader_blob = None;
+            let vertex_shader_blob =
+                // TODO Geert: MOVE THIS TO GFX INITIALIZATION. We don't want to compile from source each render!!
+                D3DCompileFromFile(
+                    PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
+                    std::ptr::null_mut(),
+                    None,
+                    PSTR(b"VSMain\0".as_ptr() as *mut u8),
+                    PSTR(b"vs_5_0\0".as_ptr() as *mut u8),
+                    compile_flags,
+                    0,
+                    &mut vertex_shader_blob,
+                    std::ptr::null_mut(),
+                )
+            .map(|()| vertex_shader_blob.unwrap())
+            .map_err(|e| win_error!(e))?;
+
+            // Create pixel shader
+            let mut pixel_shader_blob = None;
+            let pixel_shader_blob = D3DCompileFromFile(
+                PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
+                std::ptr::null_mut(),
+                None,
+                PSTR(b"PSMain\0".as_ptr() as *mut u8),
+                PSTR(b"ps_5_0\0".as_ptr() as *mut u8),
+                compile_flags,
+                0,
+                &mut pixel_shader_blob,
+                std::ptr::null_mut(),
+            )
+            .map(|()| pixel_shader_blob.unwrap())
+            .map_err(|e| win_error!(e))?;
+
             Ok(Self {
                 window_handle,
                 device: device.unwrap(),
                 swap_chain: swap_chain.unwrap(),
                 device_context: device_context.unwrap(),
                 render_target_view,
+                vertex_shader_blob,
+                pixel_shader_blob,
             })
         }
     }
@@ -174,35 +224,6 @@ impl Graphics {
                 .IASetVertexBuffers(0, 1, &Some(vertex_buffer), &stride, &offset)
         };
 
-        // Create vertex shader
-        let exe_path = std::env::current_exe().ok().unwrap();
-        let asset_path = exe_path.parent().unwrap();
-        let shaders_hlsl_path = asset_path.join("shaders.hlsl");
-        let shaders_hlsl = shaders_hlsl_path.to_str().unwrap();
-
-        let mut vertex_shader_blob = None;
-        let vertex_shader_blob = unsafe {
-            let compile_flags = if cfg!(debug_assertions) {
-                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION
-            } else {
-                0
-            };
-            // TODO Geert: MOVE THIS TO GFX INITIALIZATION. We don't want to compile from source each render!!
-            D3DCompileFromFile(
-                PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
-                std::ptr::null_mut(),
-                None,
-                PSTR("VSMain".as_ptr() as *mut u8),
-                PSTR("vs_5_0".as_ptr() as *mut u8),
-                compile_flags,
-                0,
-                &mut vertex_shader_blob,
-                std::ptr::null_mut(),
-            )
-        }
-        .map(|()| vertex_shader_blob.unwrap())
-        .map_err(|e| win_error!(e))?;
-
         let vertex_shader = unsafe {
             let class_linkage = self
                 .device
@@ -210,8 +231,8 @@ impl Graphics {
                 .map_err(|e| win_error!(e))?;
             self.device
                 .CreateVertexShader(
-                    vertex_shader_blob.GetBufferPointer(),
-                    vertex_shader_blob.GetBufferSize(),
+                    self.vertex_shader_blob.GetBufferPointer(),
+                    self.vertex_shader_blob.GetBufferSize(),
                     class_linkage,
                 )
                 .map_err(|e| win_error!(e))?
@@ -221,9 +242,31 @@ impl Graphics {
         unsafe {
             self.device_context
                 .VSSetShader(&vertex_shader, &class_instance, 0);
-        
+        }
 
-        self.device_context.Draw(core::mem::size_of::<[Vertex;3]> as u32, 0);
+        let pixel_shader = unsafe {
+            let class_linkage = self
+                .device
+                .CreateClassLinkage()
+                .map_err(|e| win_error!(e))?;
+            self.device
+                .CreatePixelShader(
+                    self.pixel_shader_blob.GetBufferPointer(),
+                    self.pixel_shader_blob.GetBufferSize(),
+                    class_linkage,
+                )
+                .map_err(|e| win_error!(e))?
+        };
+
+        let class_instance: Option<ID3D11ClassInstance> = None;
+        unsafe {
+            self.device_context
+                .PSSetShader(&pixel_shader, &class_instance, 0);
+        }
+
+        unsafe {
+            self.device_context
+                .Draw(core::mem::size_of::<[Vertex; 3]> as u32, 0);
         }
         Ok(())
     }
