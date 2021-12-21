@@ -224,6 +224,7 @@ impl Graphics {
                 .IASetVertexBuffers(0, 1, &Some(vertex_buffer), &stride, &offset)
         };
 
+        // Create vertex shader
         let vertex_shader = unsafe {
             let class_linkage = self
                 .device
@@ -238,12 +239,14 @@ impl Graphics {
                 .map_err(|e| win_error!(e))?
         };
 
+        // Bind vertex shader
         let class_instance: Option<ID3D11ClassInstance> = None;
         unsafe {
             self.device_context
                 .VSSetShader(&vertex_shader, &class_instance, 0);
         }
 
+        // Create pixel shader
         let pixel_shader = unsafe {
             let class_linkage = self
                 .device
@@ -258,11 +261,17 @@ impl Graphics {
                 .map_err(|e| win_error!(e))?
         };
 
+        
+        // Bind pixel shader
         let class_instance: Option<ID3D11ClassInstance> = None;
         unsafe {
             self.device_context
                 .PSSetShader(&pixel_shader, &class_instance, 0);
         }
+
+
+        // Bind render target
+        // TODO: Geert.
 
         unsafe {
             self.device_context
