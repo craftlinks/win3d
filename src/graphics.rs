@@ -5,13 +5,15 @@ use windows::Win32::{
     Graphics::{
         Direct3D::{
             Fxc::{D3DCompileFromFile, D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION},
-            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
+            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
         },
         Direct3D11::{
-            D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage, ID3D11Device,
-            ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Resource, D3D11_BIND_VERTEX_BUFFER,
-            D3D11_BUFFER_DESC, D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_SINGLETHREADED,
-            D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
+            D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage,
+            ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
+            ID3D11Resource, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC,
+            D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_SINGLETHREADED,
+            D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA,
+            D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
         },
         Dxgi::{
             Common::{
@@ -197,7 +199,7 @@ impl Graphics {
         let bd = D3D11_BUFFER_DESC {
             ByteWidth: core::mem::size_of::<[Vertex; 3]>() as u32,
             Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_VERTEX_BUFFER.0,
+            BindFlags: D3D11_BIND_VERTEX_BUFFER.0 | D3D11_BIND_DEPTH_STENCIL.0,
             CPUAccessFlags: 0,
             MiscFlags: 0,
             StructureByteStride: core::mem::size_of::<Vertex>() as u32,
@@ -220,9 +222,17 @@ impl Graphics {
         let offset = 0;
 
         unsafe {
-            self.device_context
-                .IASetVertexBuffers(0, 1, &Some(vertex_buffer), &stride, &offset)
+            self.device_context.IASetVertexBuffers(
+                0,
+                1,
+                &Some(vertex_buffer.to_owned()),
+                &stride,
+                &offset,
+            )
         };
+
+        // Input (vertex) buffer to pipeline
+        
 
         // Create vertex shader
         let vertex_shader = unsafe {
@@ -261,7 +271,6 @@ impl Graphics {
                 .map_err(|e| win_error!(e))?
         };
 
-        
         // Bind pixel shader
         let class_instance: Option<ID3D11ClassInstance> = None;
         unsafe {
@@ -269,10 +278,35 @@ impl Graphics {
                 .PSSetShader(&pixel_shader, &class_instance, 0);
         }
 
-
         // Bind render target
-        // TODO: Geert.
+        unsafe {
+            let depth_stencil_view = self
+                .device
+                .CreateDepthStencilView(&vertex_buffer, &D3D11_DEPTH_STENCIL_VIEW_DESC::default())
+                .map_err(|e| win_error!(e))?;
+            self.device_context.OMSetRenderTargets(
+                1,
+                &Some(self.render_target_view.to_owned()),
+                &depth_stencil_view,
+            );
+        }
 
+        // Set primitive topology to triangle list (groups of 3 vertices)
+        unsafe {self.device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);}
+
+        // Configure viewport
+        let vp = D3D11_VIEWPORT {
+            TopLeftX: 0.0,
+            TopLeftY: 0.0,
+            Width: 800.0,
+            Height: 600.0,
+            MinDepth: 0.0,
+            MaxDepth: 1.0,
+        };
+
+        unsafe {
+            self.device_context.RSSetViewports(1, &vp);
+        }
         unsafe {
             self.device_context
                 .Draw(core::mem::size_of::<[Vertex; 3]> as u32, 0);
