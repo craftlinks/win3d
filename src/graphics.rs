@@ -5,16 +5,16 @@ use windows::Win32::{
     Graphics::{
         Direct3D::{
             Fxc::{D3DCompileFromFile, D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION},
-            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY,
-            D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
+            D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
         },
         Direct3D11::{
-            D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage,
-            ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
-            ID3D11Resource, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC,
-            D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_SINGLETHREADED,
-            D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_INPUT_ELEMENT_DESC, D3D11_SDK_VERSION,
-            D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, D3D11_INPUT_PER_VERTEX_DATA,
+            D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11Device, ID3D11DeviceContext,
+            ID3D11RenderTargetView, ID3D11Resource, D3D11_BIND_DEPTH_STENCIL,
+            D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC, D3D11_CREATE_DEVICE_DEBUG,
+            D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_DEPTH_STENCIL_VIEW_DESC,
+            D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_SDK_VERSION,
+            D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
         },
         Dxgi::{
             Common::{
@@ -130,18 +130,17 @@ impl Graphics {
             };
 
             let mut vertex_shader_blob = None;
-            let vertex_shader_blob =
-                D3DCompileFromFile(
-                    PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
-                    std::ptr::null_mut(),
-                    None,
-                    PSTR(b"VSMain\0".as_ptr() as *mut u8),
-                    PSTR(b"vs_5_0\0".as_ptr() as *mut u8),
-                    compile_flags,
-                    0,
-                    &mut vertex_shader_blob,
-                    std::ptr::null_mut(),
-                )
+            let vertex_shader_blob = D3DCompileFromFile(
+                PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
+                std::ptr::null_mut(),
+                None,
+                PSTR(b"VSMain\0".as_ptr() as *mut u8),
+                PSTR(b"vs_5_0\0".as_ptr() as *mut u8),
+                compile_flags,
+                0,
+                &mut vertex_shader_blob,
+                std::ptr::null_mut(),
+            )
             .map(|()| vertex_shader_blob.unwrap())
             .map_err(|e| win_error!(e))?;
 
@@ -237,7 +236,7 @@ impl Graphics {
             let input_layout = {
                 let input_element_description = D3D11_INPUT_ELEMENT_DESC {
                     SemanticName: PSTR("Position".as_ptr() as *mut u8), // Needs to be the same as the label in the vertex shader
-                    SemanticIndex: 0, // We are not using indices
+                    SemanticIndex: 0,                                   // We are not using indices
                     Format: DXGI_FORMAT_R32G32_FLOAT, // Describes the data in the element: 2 32-bit floating point values
                     InputSlot: 0,
                     AlignedByteOffset: 0, // offset in bytes from the beginning of the structures
