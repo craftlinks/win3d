@@ -5,20 +5,22 @@ use windows::Win32::{
     Graphics::{
         Direct3D::{
             Fxc::{D3DCompileFromFile, D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION},
-            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+            ID3DBlob, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY,
+            D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
         },
         Direct3D11::{
             D3D11CreateDeviceAndSwapChain, ID3D11ClassInstance, ID3D11ClassLinkage,
             ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
             ID3D11Resource, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC,
             D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_SINGLETHREADED,
-            D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA,
-            D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
+            D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_INPUT_ELEMENT_DESC, D3D11_SDK_VERSION,
+            D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, D3D11_INPUT_PER_VERTEX_DATA,
         },
         Dxgi::{
             Common::{
-                DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_DESC, DXGI_MODE_SCALING_UNSPECIFIED,
-                DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED, DXGI_RATIONAL, DXGI_SAMPLE_DESC,
+                DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R32G32_FLOAT, DXGI_MODE_DESC,
+                DXGI_MODE_SCALING_UNSPECIFIED, DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED, DXGI_RATIONAL,
+                DXGI_SAMPLE_DESC,
             },
             IDXGISwapChain, DXGI_ERROR_DEVICE_REMOVED, DXGI_SWAP_CHAIN_DESC,
             DXGI_SWAP_EFFECT_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -129,7 +131,6 @@ impl Graphics {
 
             let mut vertex_shader_blob = None;
             let vertex_shader_blob =
-                // TODO Geert: MOVE THIS TO GFX INITIALIZATION. We don't want to compile from source each render!!
                 D3DCompileFromFile(
                     PWSTR(shaders_hlsl.to_wide().as_mut_ptr()),
                     std::ptr::null_mut(),
@@ -183,7 +184,6 @@ impl Graphics {
                 win_error!(e)
             })?;
         }
-
         Ok(())
     }
 
@@ -215,6 +215,7 @@ impl Graphics {
             self.device
                 .CreateBuffer(&bd, &sd)
                 .map_err(|e| win_error!(e))?
+            // TODO Geert: Things go wrong right here...
         };
 
         // Bind vertex buffer to pipeline
@@ -231,8 +232,32 @@ impl Graphics {
             )
         };
 
-        // Input (vertex) buffer to pipeline
-        
+        // Input (vertex) layout (2d position only)
+        unsafe {
+            let input_layout = {
+                let input_element_description = D3D11_INPUT_ELEMENT_DESC {
+                    SemanticName: PSTR("Position".as_ptr() as *mut u8), // Needs to be the same as the label in the vertex shader
+                    SemanticIndex: 0, // We are not using indices
+                    Format: DXGI_FORMAT_R32G32_FLOAT, // Describes the data in the element: 2 32-bit floating point values
+                    InputSlot: 0,
+                    AlignedByteOffset: 0, // offset in bytes from the beginning of the structures
+                    InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+                    InstanceDataStepRate: 0,
+                };
+
+                self.device
+                    .CreateInputLayout(
+                        &input_element_description,
+                        1, // length of the description array??
+                        self.vertex_shader_blob.GetBufferPointer(),
+                        self.vertex_shader_blob.GetBufferSize(),
+                    )
+                    .map_err(|e| win_error!(e))?
+            };
+
+            // Bind the input layout
+            self.device_context.IASetInputLayout(&input_layout);
+        }
 
         // Create vertex shader
         let vertex_shader = unsafe {
@@ -248,7 +273,6 @@ impl Graphics {
                 )
                 .map_err(|e| win_error!(e))?
         };
-
         // Bind vertex shader
         let class_instance: Option<ID3D11ClassInstance> = None;
         unsafe {
@@ -270,7 +294,6 @@ impl Graphics {
                 )
                 .map_err(|e| win_error!(e))?
         };
-
         // Bind pixel shader
         let class_instance: Option<ID3D11ClassInstance> = None;
         unsafe {
@@ -292,7 +315,10 @@ impl Graphics {
         }
 
         // Set primitive topology to triangle list (groups of 3 vertices)
-        unsafe {self.device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);}
+        unsafe {
+            self.device_context
+                .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        }
 
         // Configure viewport
         let vp = D3D11_VIEWPORT {
