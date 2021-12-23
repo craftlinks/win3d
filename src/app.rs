@@ -1,4 +1,4 @@
-use std::time::{SystemTime, Instant};
+use std::time::{Instant};
 
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE, WM_QUIT,
