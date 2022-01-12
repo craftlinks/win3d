@@ -176,7 +176,7 @@ impl Graphics {
         unsafe {
             self.swap_chain.Present(1, 0).map_err(|e| {
                 if let Some(hresult) = e.win32_error() {
-                    if hresult == DXGI_ERROR_DEVICE_REMOVED.0 {
+                    if hresult == DXGI_ERROR_DEVICE_REMOVED.0.try_into().unwrap() {
                         println!("{:?}", self.device.GetDeviceRemovedReason());
                     }
                 }
@@ -198,7 +198,7 @@ impl Graphics {
         let bd = D3D11_BUFFER_DESC {
             ByteWidth: core::mem::size_of::<[Vertex; 3]>() as u32,
             Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_VERTEX_BUFFER.0 | D3D11_BIND_DEPTH_STENCIL.0,
+            BindFlags: D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_DEPTH_STENCIL,
             CPUAccessFlags: 0,
             MiscFlags: 0,
             StructureByteStride: core::mem::size_of::<Vertex>() as u32,

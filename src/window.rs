@@ -43,7 +43,7 @@ impl Window {
             width,
             height,
             window_name: window_user_name.into(),
-            window_handle: HWND(0),
+            window_handle: 0,
             visible: false, // will need to be set on actual window creation
             kbd: Keyboard::new(),
             mouse: Mouse::new(),
@@ -101,7 +101,7 @@ impl Window {
 
             
             // Check for error
-            debug_assert!(window_handle.0 != 0);
+            debug_assert!(window_handle != 0);
             debug_assert!(window_handle == self.window_handle);
 
             // Create graphics object
@@ -113,10 +113,10 @@ impl Window {
 
     fn render(&mut self) -> Result<()> {
         // TEST KBD CODE
-        if self.kbd.key_is_pressed(VK_MENU.0) {
+        if self.kbd.key_is_pressed(VK_MENU) {
             unsafe {
                 MessageBoxW(
-                    HWND(0),
+                    0,
                     PWSTR("Message Received!".to_wide().as_ptr() as *mut u16),
                     PWSTR("ALT Key Pressed!".to_wide().as_ptr() as *mut u16),
                     MB_OK,
@@ -145,44 +145,43 @@ impl Window {
             match message {
                 WM_ACTIVATE => {
                     self.visible = true;
-                    LRESULT(0)
+                    0
                 }
 
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
                     // filter for autorepeat key messages to decide whether to process a key press or not.
-                    if lparam.0 & 0x40000000 == 0 || self.kbd.auto_repeat_is_enabled() {
+                    if lparam & 0x40000000 == 0 || self.kbd.auto_repeat_is_enabled() {
                         self.kbd.on_key_pressed(
                             wparam
-                                .0
                                 .try_into()
                                 .expect("failed to convert keycode to u8"),
                         );
                     }
-                    LRESULT(0)
+                    0
                 }
 
                 WM_KEYUP | WM_SYSKEYUP => {
                     self.kbd
-                        .on_key_released(wparam.0.try_into().expect("failed to convert keycode"));
-                    LRESULT(0)
+                        .on_key_released(wparam.try_into().expect("failed to convert keycode"));
+                    0
                 }
 
                 WM_CHAR => {
                     self.kbd
-                        .on_char(wparam.0.try_into().expect("failed to convert char"));
-                    LRESULT(0)
+                        .on_char(wparam.try_into().expect("failed to convert char"));
+                    0
                 }
 
                 WM_KILLFOCUS => {
                     self.kbd.clear_state();
-                    LRESULT(0)
+                    0
                 }
 
                 WM_MOUSEMOVE => {
                     // First 16-bits of lparam contain mouse x-position
-                    let x = lparam.0 & 0xFFFF;
+                    let x = lparam & 0xFFFF;
                     // Next 16-bits of lparam contain mouse y-position
-                    let y = (lparam.0 >> 16) & 0xFFFF;
+                    let y = (lparam >> 16) & 0xFFFF;
 
                     // Mouse inside client area
                     if x >= 0 && y >= 0 && x < self.width as isize && y < self.height as isize {
@@ -205,41 +204,41 @@ impl Window {
                             self.mouse.on_mouse_leave();
                         }
                     }
-                    LRESULT(0)
+                    0
                 }
 
                 WM_LBUTTONDOWN => {
                     self.mouse.on_left_pressed();
-                    LRESULT(0)
+                    0
                 }
 
                 WM_RBUTTONDOWN => {
                     self.mouse.on_right_pressed();
-                    LRESULT(0)
+                    0
                 }
 
                 WM_LBUTTONUP => {
                     self.mouse.on_left_released();
-                    LRESULT(0)
+                    0
                 }
 
                 WM_RBUTTONUP => {
                     self.mouse.on_right_released();
-                    LRESULT(0)
+                    0
                 }
 
                 WM_MOUSEHWHEEL => {
                     // First 16-bits of lparam contain mouse x-position
-                    let x = lparam.0 & 0xFFFF;
+                    let x = lparam & 0xFFFF;
                     // Next 16-bits of lparam contain mouse y-position
-                    let y = (lparam.0 >> 16) & 0xFFFF;
-                    self.mouse.on_wheel_delta(x, y, wparam.0);
-                    LRESULT(0)
+                    let y = (lparam >> 16) & 0xFFFF;
+                    self.mouse.on_wheel_delta(x, y, wparam);
+                    0
                 }
 
                 WM_DESTROY => {
                     PostQuitMessage(0);
-                    LRESULT(0)
+                    0
                 }
                 _ => DefWindowProcW(self.window_handle, message, wparam, lparam),
             }
@@ -254,7 +253,7 @@ impl Window {
     ) -> LRESULT {
         unsafe {
             if message == WM_NCCREATE {
-                let cs = lparam.0 as *const CREATESTRUCTW;
+                let cs = lparam as *const CREATESTRUCTW;
                 let this = (*cs).lpCreateParams as *mut Self;
                 (*this).window_handle = window_handle;
                 SetWindowLongPtrW(window_handle, GWLP_USERDATA, this as isize);
@@ -273,7 +272,7 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         unsafe {
-            if self.window_handle.0 != 0 {
+            if self.window_handle != 0 {
                 println!("Destroying window.");
                 let _ = DestroyWindow(self.window_handle)
                     .ok()
