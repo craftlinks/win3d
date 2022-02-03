@@ -17,6 +17,7 @@ impl Win32Error {
 }
 
 #[allow(unused_macros)]
+#[macro_export]
 macro_rules! win_error {
     ($error:expr) => {{
             crate::error::Win32Error::new(line!(), file!(), $error)
